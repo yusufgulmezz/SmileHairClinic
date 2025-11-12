@@ -14,6 +14,8 @@ import '../core/providers/capture_provider.dart';
 import '../core/utils/image_converter.dart';
 import '../widgets/oval_overlay.dart';
 import '../widgets/circular_progress_indicator.dart';
+import '../widgets/oval_camera_mask.dart';
+import '../widgets/circular_progress_ring.dart';
 
 class CameraScreen extends ConsumerStatefulWidget {
   const CameraScreen({super.key});
@@ -463,122 +465,81 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     // Kamera preview boyutunu al
     final previewSize = _cameraController!.value.previewSize;
 
+    // Oval boyutları
+    const double ovalWidth = 240;
+    const double ovalHeight = 300;
+
     return Scaffold(
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // Kamera Önizlemesi - Esnemeyi düzeltmek için
+          // Kamera Önizlemesi - Oval mask ile
           Positioned.fill(
-            child: ClipRect(
-              // ClipRect, taşan kısımları keser (hardEdge)
-              child: FittedBox(
-                // FittedBox, en-boy oranını koruyarak içeriği kaplamayı (BoxFit.cover) sağlar.
-                // Bu, görüntüyü esnetmek yerine kırpar.
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  // Burası kritik:
-                  // Kamera sensörü genelde landscape (yatay) bir görüntü üretir
-                  // (örn: 640x480). Biz telefonu dikey tuttuğumuz için
-                  // bu boyutları ters çevirerek (480x640) kullanmalıyız.
-                  width: previewSize?.height ?? 480,
-                  height: previewSize?.width ?? 640,
-                  child: CameraPreview(_cameraController!),
+            child: OvalCameraMask(
+              cameraPreview: ClipRect(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: previewSize?.height ?? 480,
+                    height: previewSize?.width ?? 640,
+                    child: Stack(
+                      children: [
+                        CameraPreview(_cameraController!),
+                        // Yüz algılama bounding box'ları (sadece oval içinde görünecek)
+                        if (_customPaint != null)
+                          _customPaint!,
+                      ],
+                    ),
+                  ),
                 ),
               ),
+              width: ovalWidth,
+              height: ovalHeight,
+              backgroundColor: Colors.white,
             ),
           ),
 
-          // Yüz algılama bounding box'ları
-          if (_customPaint != null)
-            Positioned.fill(
-              child: _customPaint!,
-            ),
-
-          // Oval overlay (yüz çerçevesi)
-          const OvalOverlay(
-            borderColor: Colors.red,
-            width: 200,
-            height: 300,
-          ),
-
-          // Üst bilgi paneli
-          Positioned(
-            top: 40,
-            left: 16,
-            right: 16,
+          // Oval border (kırmızı çerçeve)
+          Center(
             child: Container(
-              padding: const EdgeInsets.all(12),
+              width: ovalWidth,
+              height: ovalHeight,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(8),
+                shape: BoxShape.rectangle,
+                borderRadius: BorderRadius.circular(ovalHeight / 2),
+                // border: Border.all(
+                //   color: Colors.red,
+                //   width: 3.0,
+                // ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Adım ${currentAngle.stepNumber}/5: ${currentAngle.name}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    currentAngle.instruction,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _faceDetectionStatus,
-                    style: TextStyle(
-                      color: !_faceDetectionEnabled 
-                          ? Colors.red 
-                          : (_detectedFaces.isEmpty ? Colors.orange : Colors.greenAccent),
-                      fontSize: 12,
-                      fontStyle: FontStyle.italic,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  if (!_faceDetectionEnabled)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text(
-                        '⚠️ Fotoğraf çekmek için yüz algılama gerekli',
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  if (_detectedFaces.length > 1)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text(
-                        '⚠️ Birden fazla yüz algılandı!',
-                        style: TextStyle(
-                          color: Colors.orange,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  if (_detectedFaces.length == 1)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text(
-                        '✓ Yüz algılandı - Fotoğraf çekebilirsiniz',
-                        style: TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                ],
+            ),
+          ),
+
+          // Circle dışında 5 parçalı yeşil progress ring
+          Center(
+            child: CircularProgressRing(
+              completedSteps: captureState.completedCount,
+              totalSteps: 5,
+              circleRadius: ovalHeight / 2 + 5, // Oval'ın 5px dışında
+              strokeWidth: 10.0,
+              completedColor: Colors.green,
+              remainingColor: Colors.grey.shade300,
+            ),
+          ),
+
+          // Üst başlık (sadece açı adı)
+          Positioned(
+            top: 50,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                currentAngle.name,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
