@@ -460,23 +460,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       );
     }
 
-    // Kamera preview boyutunu al
-    final previewSize = _cameraController!.value.previewSize;
-    final screenSize = MediaQuery.of(context).size;
-
     return Scaffold(
       body: Stack(
         children: [
-          // Kamera önizlemesi - Aspect ratio korunarak tam ekran
+          // Kamera önizlemesi - CameraPreview kendi aspect ratio'sunu korur
+          // Positioned.fill ile tam ekran, CameraPreview otomatik olarak doğru boyutlandırır
           Positioned.fill(
-            child: FittedBox(
-              fit: BoxFit.cover, // Aspect ratio koruyarak ekranı doldur
-              child: SizedBox(
-                width: previewSize?.width ?? screenSize.width,
-                height: previewSize?.height ?? screenSize.height,
-                child: CameraPreview(_cameraController!),
-              ),
-            ),
+            child: CameraPreview(_cameraController!),
           ),
 
           // Yüz algılama bounding box'ları
