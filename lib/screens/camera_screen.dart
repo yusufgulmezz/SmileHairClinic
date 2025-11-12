@@ -460,13 +460,31 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       );
     }
 
+    // Kamera preview boyutunu al
+    final previewSize = _cameraController!.value.previewSize;
+
     return Scaffold(
       body: Stack(
         children: [
-          // Kamera önizlemesi - CameraPreview kendi aspect ratio'sunu korur
-          // Positioned.fill ile tam ekran, CameraPreview otomatik olarak doğru boyutlandırır
+          // Kamera Önizlemesi - Esnemeyi düzeltmek için
           Positioned.fill(
-            child: CameraPreview(_cameraController!),
+            child: ClipRect(
+              // ClipRect, taşan kısımları keser (hardEdge)
+              child: FittedBox(
+                // FittedBox, en-boy oranını koruyarak içeriği kaplamayı (BoxFit.cover) sağlar.
+                // Bu, görüntüyü esnetmek yerine kırpar.
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  // Burası kritik:
+                  // Kamera sensörü genelde landscape (yatay) bir görüntü üretir
+                  // (örn: 640x480). Biz telefonu dikey tuttuğumuz için
+                  // bu boyutları ters çevirerek (480x640) kullanmalıyız.
+                  width: previewSize?.height ?? 480,
+                  height: previewSize?.width ?? 640,
+                  child: CameraPreview(_cameraController!),
+                ),
+              ),
+            ),
           ),
 
           // Yüz algılama bounding box'ları
