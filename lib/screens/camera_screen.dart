@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,8 +11,7 @@ import 'package:path/path.dart' as path;
 import '../core/models/capture_angle.dart';
 import '../core/providers/capture_provider.dart';
 import '../core/utils/image_converter.dart';
-import '../widgets/oval_overlay.dart';
-import '../widgets/circular_progress_indicator.dart';
+import '../core/utils/sensor_angle_detector.dart';
 import '../widgets/oval_camera_mask.dart';
 import '../widgets/circular_progress_ring.dart';
 
@@ -46,11 +44,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   CustomPaint? _customPaint;
   String _faceDetectionStatus = 'Başlatılıyor...';
 
-  // Sensör verileri (ileride açı kontrolü için kullanılacak)
-  // ignore: unused_field
+  // Sensör verileri
   double _pitch = 0.0;
-  // ignore: unused_field
   double _roll = 0.0;
+
+  // Sensör bazlı pozisyon kontrolü
+  List<double> _pitchHistory = [];
+  List<double> _rollHistory = [];
+  static const int _maxHistorySize = 20;
+  bool _isPositionValid = false;
+  bool _isPositionStable = false;
+  String _sensorGuidance = '';
+  Timer? _autoCaptureTimer;
 
   // Stream subscription'ları
   StreamSubscription<GyroscopeEvent>? _gyroscopeSubscription;
@@ -157,20 +162,104 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   }
 
   void _initializeSensors() {
+    // Gyroscope verileri şu an kullanılmıyor ama gelecekte kullanılabilir
     _gyroscopeSubscription = gyroscopeEventStream().listen((GyroscopeEvent event) {
-      // Gyroscope verileri ileride kullanılacak
+      // Gyroscope verileri gelecekte kullanılabilir
     });
 
     _accelerometerSubscription =
         accelerometerEventStream().listen((AccelerometerEvent event) {
       if (mounted) {
         setState(() {
-          _pitch = (180 / math.pi) *
-              (math.atan2(-event.x, math.sqrt(event.y * event.y + event.z * event.z)));
-          _roll = (180 / math.pi) * (math.atan2(event.y, event.z));
+          // Pitch ve Roll hesapla
+          _pitch = SensorAngleDetector.calculatePitch(
+            event.x,
+            event.y,
+            event.z,
+          );
+          _roll = SensorAngleDetector.calculateRoll(
+            event.x,
+            event.y,
+            event.z,
+          );
+
+          // Geçmiş verileri güncelle
+          _pitchHistory.add(_pitch);
+          _rollHistory.add(_roll);
+
+          // Geçmiş verileri sınırla
+          if (_pitchHistory.length > _maxHistorySize) {
+            _pitchHistory.removeAt(0);
+          }
+          if (_rollHistory.length > _maxHistorySize) {
+            _rollHistory.removeAt(0);
+          }
+
+          // Mevcut açıya göre pozisyon kontrolü yap
+          _checkSensorBasedPosition();
         });
       }
     });
+  }
+
+  /// Sensör bazlı pozisyon kontrolü (Vertex ve Back Donor için)
+  void _checkSensorBasedPosition() {
+    final captureState = ref.read(captureProvider);
+    final currentAngle = captureState.currentAngle ?? CaptureAngle.frontFace;
+
+    // Sadece Vertex ve Back Donor için sensör kontrolü yap
+    if (currentAngle == CaptureAngle.topVertex) {
+      _isPositionValid = SensorAngleDetector.isVertexAngleValid(_pitch, _roll);
+      _sensorGuidance = SensorAngleDetector.getVertexGuidance(_pitch, _roll);
+    } else if (currentAngle == CaptureAngle.backDonor) {
+      _isPositionValid = SensorAngleDetector.isBackDonorAngleValid(_pitch, _roll);
+      _sensorGuidance = SensorAngleDetector.getBackDonorGuidance(_pitch, _roll);
+    } else {
+      // Front, Left, Right için yüz algılama kullanılacak
+      _isPositionValid = false;
+      _sensorGuidance = '';
+      return;
+    }
+
+    // Pozisyon stabilitesini kontrol et
+    _isPositionStable = SensorAngleDetector.isPositionStable(
+      _pitchHistory,
+      _rollHistory,
+    );
+
+    // Pozisyon doğru ve stabilse otomatik çekim için timer başlat
+    if (_isPositionValid && _isPositionStable) {
+      _startAutoCaptureTimer();
+    } else {
+      _cancelAutoCaptureTimer();
+    }
+  }
+
+  /// Otomatik çekim timer'ı başlat (2 saniye sonra çek)
+  void _startAutoCaptureTimer() {
+    if (_autoCaptureTimer != null && _autoCaptureTimer!.isActive) {
+      return; // Timer zaten aktif
+    }
+
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _isPositionValid && _isPositionStable && !_isCapturing) {
+        final captureState = ref.read(captureProvider);
+        final currentAngle = captureState.currentAngle;
+        
+        // Sadece Vertex ve Back Donor için otomatik çekim
+        if (currentAngle == CaptureAngle.topVertex ||
+            currentAngle == CaptureAngle.backDonor) {
+          _capturePhoto();
+        }
+      }
+    });
+  }
+
+  /// Otomatik çekim timer'ını iptal et
+  void _cancelAutoCaptureTimer() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
   }
 
   // Yüz algılama için frame sayacı (her N frame'de bir algılama yap)
@@ -182,6 +271,23 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   bool _faceDetectionEnabled = true;
 
   Future<void> _processCameraImage(CameraImage image) async {
+    // Mevcut açıya göre yüz algılamayı kontrol et
+    final captureState = ref.read(captureProvider);
+    final currentAngle = captureState.currentAngle ?? CaptureAngle.frontFace;
+
+    // Vertex ve Back Donor için yüz algılama gerekmez (sensör kontrolü kullanılacak)
+    if (currentAngle == CaptureAngle.topVertex ||
+        currentAngle == CaptureAngle.backDonor) {
+      if (mounted && _faceDetectionStatus != 'Sensör kontrolü aktif') {
+        setState(() {
+          _faceDetectionStatus = 'Sensör kontrolü aktif';
+          _detectedFaces = [];
+          _customPaint = null;
+        });
+      }
+      return;
+    }
+
     // Yüz algılama devre dışı bırakıldıysa atla
     if (!_faceDetectionEnabled) {
       if (mounted && _faceDetectionStatus != 'Yüz algılama devre dışı') {
@@ -338,6 +444,24 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     );
   }
 
+  /// Fotoğraf çekilebilir mi kontrol et
+  bool _canCapturePhoto(CaptureAngle currentAngle) {
+    if (_isCapturing || _cameraController == null || !_isCameraInitialized) {
+      return false;
+    }
+
+    // Vertex ve Back Donor için sensör kontrolü
+    if (currentAngle == CaptureAngle.topVertex ||
+        currentAngle == CaptureAngle.backDonor) {
+      return _isPositionValid && _isPositionStable;
+    }
+
+    // Front, Left, Right için yüz algılama kontrolü
+    return _faceDetectionEnabled &&
+        _detectedFaces.isNotEmpty &&
+        _detectedFaces.length == 1;
+  }
+
   Future<void> _capturePhoto() async {
     final captureState = ref.read(captureProvider);
     final currentAngle = captureState.currentAngle;
@@ -347,29 +471,27 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       return;
     }
 
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      _showSnackBar('Kamera hazır değil');
+    if (!_canCapturePhoto(currentAngle)) {
+      if (currentAngle == CaptureAngle.topVertex ||
+          currentAngle == CaptureAngle.backDonor) {
+        if (!_isPositionValid) {
+          _showSnackBar('Doğru pozisyona gelin');
+        } else if (!_isPositionStable) {
+          _showSnackBar('Telefonu sabit tutun');
+        }
+      } else {
+        if (!_faceDetectionEnabled) {
+          _showSnackBar('Yüz algılama aktif değil. Lütfen bekleyin...');
+        } else if (_detectedFaces.isEmpty) {
+          _showSnackBar('Yüz algılanamadı. Lütfen kameraya bakın!');
+        } else if (_detectedFaces.length > 1) {
+          _showSnackBar('Birden fazla yüz algılandı. Lütfen tek başınıza çekim yapın.');
+        }
+      }
       return;
     }
 
     if (_isCapturing) return;
-
-    // Yüz algılama kontrolü - ZORUNLU
-    if (!_faceDetectionEnabled) {
-      _showSnackBar('Yüz algılama aktif değil. Lütfen bekleyin...');
-      return;
-    }
-
-    if (_detectedFaces.isEmpty) {
-      _showSnackBar('Yüz algılanamadı. Lütfen kameraya bakın!');
-      return;
-    }
-
-    // Sadece 1 yüz algılanmalı (kendi yüzünüz)
-    if (_detectedFaces.length > 1) {
-      _showSnackBar('Birden fazla yüz algılandı. Lütfen tek başınıza çekim yapın.');
-      return;
-    }
 
     setState(() {
       _isCapturing = true;
@@ -442,8 +564,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
   @override
   void dispose() {
+    _cancelAutoCaptureTimer();
     _gyroscopeSubscription?.cancel();
     _accelerometerSubscription?.cancel();
+    _cameraController?.stopImageStream();
     _cameraController?.dispose();
     _faceDetector.close();
     super.dispose();
@@ -575,43 +699,181 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
           // Alt kısım - İlerleme çubuğu ve butonlar
           Positioned(
-            bottom: 30,
+            bottom: 0,
             left: 0,
             right: 0,
-            child: Column(
-              children: [
-                // Dairesel ilerleme göstergesi
-                StepCircularProgress(
-                  currentStep: captureState.currentStep,
-                  totalSteps: 5,
-                  size: 80,
-                ),
-                const SizedBox(height: 16),
-                // Fotoğraf çekme butonu - sadece yüz algılandığında aktif
-                FloatingActionButton(
-                  heroTag: 'capture',
-                  onPressed: (_isCapturing || !_faceDetectionEnabled || _detectedFaces.isEmpty) 
-                      ? null 
-                      : _capturePhoto,
-                  backgroundColor: (_faceDetectionEnabled && _detectedFaces.isNotEmpty)
-                      ? Colors.red.withOpacity(0.8)
-                      : Colors.grey.withOpacity(0.6),
-                  child: _isCapturing
-                      ? const SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : Icon(
-                          Icons.camera_alt,
-                          color: Colors.white,
-                          size: 30,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Sensör bazlı yönlendirme (Vertex ve Back Donor için)
+                    if (currentAngle == CaptureAngle.topVertex ||
+                        currentAngle == CaptureAngle.backDonor)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
                         ),
+                        child: Column(
+                          children: [
+                            // Yönlendirme mesajı
+                            Text(
+                              _sensorGuidance.isNotEmpty
+                                  ? _sensorGuidance
+                                  : 'Pozisyonu ayarlayın...',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _isPositionValid && _isPositionStable
+                                    ? Colors.green
+                                    : Colors.orange,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // Pozisyon durumu göstergesi
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // Pozisyon geçerliliği
+                                Icon(
+                                  _isPositionValid
+                                      ? Icons.check_circle
+                                      : Icons.cancel,
+                                  color: _isPositionValid
+                                      ? Colors.green
+                                      : Colors.red,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Pozisyon: ${_isPositionValid ? "Doğru" : "Yanlış"}',
+                                  style: TextStyle(
+                                    color: _isPositionValid
+                                        ? Colors.green
+                                        : Colors.red,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                // Stabilite durumu
+                                Icon(
+                                  _isPositionStable
+                                      ? Icons.check_circle
+                                      : Icons.sync,
+                                  color: _isPositionStable
+                                      ? Colors.green
+                                      : Colors.orange,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Stabil: ${_isPositionStable ? "Evet" : "Hayır"}',
+                                  style: TextStyle(
+                                    color: _isPositionStable
+                                        ? Colors.green
+                                        : Colors.orange,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_isPositionValid && _isPositionStable)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text(
+                                  '2 saniye sonra otomatik çekim yapılacak',
+                                  style: TextStyle(
+                                    color: Colors.green,
+                                    fontSize: 11,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    // Talimat metni (Front, Left, Right için)
+                    if (currentAngle != CaptureAngle.topVertex &&
+                        currentAngle != CaptureAngle.backDonor)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                        child: Text(
+                          currentAngle.instruction,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.black87,
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                    // Yüz algılama durumu (Front, Left, Right için)
+                    if (currentAngle != CaptureAngle.topVertex &&
+                        currentAngle != CaptureAngle.backDonor &&
+                        _faceDetectionEnabled)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          _faceDetectionStatus,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _detectedFaces.isEmpty
+                                ? Colors.orange
+                                : (_detectedFaces.length == 1
+                                    ? Colors.green
+                                    : Colors.red),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    // Fotoğraf çekme butonu
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: FloatingActionButton(
+                        heroTag: 'capture',
+                        onPressed: _canCapturePhoto(currentAngle)
+                            ? _capturePhoto
+                            : null,
+                        backgroundColor: _canCapturePhoto(currentAngle)
+                            ? Colors.red
+                            : Colors.grey.shade400,
+                        child: _isCapturing
+                            ? const SizedBox(
+                                width: 30,
+                                height: 30,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Icon(
+                                Icons.camera_alt,
+                                color: Colors.white,
+                                size: 30,
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ],
