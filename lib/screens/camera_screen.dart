@@ -12,6 +12,7 @@ import '../core/models/capture_angle.dart';
 import '../core/providers/capture_provider.dart';
 import '../core/utils/image_converter.dart';
 import '../core/utils/sensor_angle_detector.dart';
+import '../core/utils/face_side_detector.dart';
 import '../widgets/oval_camera_mask.dart';
 import '../widgets/circular_progress_ring.dart';
 
@@ -43,6 +44,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   List<Face> _detectedFaces = [];
   CustomPaint? _customPaint;
   String _faceDetectionStatus = 'Başlatılıyor...';
+  bool _isCorrectFaceSide = false; // Yüzün doğru tarafı görünüyor mu?
 
   // Sensör verileri
   double _pitch = 0.0;
@@ -320,15 +322,37 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       _faceDetectionErrorCount = 0;
 
       if (mounted) {
+        // Yüzün doğru tarafının görünür olup olmadığını kontrol et
+        bool isCorrectSide = false;
+        String sideGuidance = '';
+        
+        if (faces.length == 1) {
+          final face = faces[0];
+          isCorrectSide = FaceSideDetector.isCorrectFaceSideVisible(face, currentAngle);
+          sideGuidance = FaceSideDetector.getFaceSideGuidance(face, currentAngle);
+        }
+
         setState(() {
           _detectedFaces = faces;
+          _isCorrectFaceSide = isCorrectSide;
           _customPaint = _createCustomPaint(faces, image);
           
           // Yüz algılama durumu mesajını güncelle
           if (faces.isEmpty) {
             _faceDetectionStatus = 'Yüz algılanamadı - Kameraya bakın';
           } else if (faces.length == 1) {
-            _faceDetectionStatus = '✓ 1 yüz algılandı - Fotoğraf çekilebilir';
+            if (currentAngle == CaptureAngle.frontFace ||
+                currentAngle == CaptureAngle.leftSide ||
+                currentAngle == CaptureAngle.rightSide) {
+              // Yüz yönü kontrolü gereken açılar için
+              if (isCorrectSide) {
+                _faceDetectionStatus = '✓ ${sideGuidance.isNotEmpty ? sideGuidance : "Pozisyon iyi - Fotoğraf çekilebilir"}';
+              } else {
+                _faceDetectionStatus = '⚠ $sideGuidance';
+              }
+            } else {
+              _faceDetectionStatus = '✓ 1 yüz algılandı - Fotoğraf çekilebilir';
+            }
           } else {
             _faceDetectionStatus = '⚠ ${faces.length} yüz algılandı - Tek başınıza çekim yapın';
           }
@@ -456,10 +480,21 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       return _isPositionValid && _isPositionStable;
     }
 
-    // Front, Left, Right için yüz algılama kontrolü
-    return _faceDetectionEnabled &&
-        _detectedFaces.isNotEmpty &&
-        _detectedFaces.length == 1;
+    // Front, Left, Right için yüz algılama ve yüz yönü kontrolü
+    if (!_faceDetectionEnabled ||
+        _detectedFaces.isEmpty ||
+        _detectedFaces.length != 1) {
+      return false;
+    }
+
+    // Yüzün doğru tarafının görünür olup olmadığını kontrol et
+    if (currentAngle == CaptureAngle.frontFace ||
+        currentAngle == CaptureAngle.leftSide ||
+        currentAngle == CaptureAngle.rightSide) {
+      return _isCorrectFaceSide;
+    }
+
+    return true;
   }
 
   Future<void> _capturePhoto() async {
@@ -482,11 +517,22 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       } else {
         if (!_faceDetectionEnabled) {
           _showSnackBar('Yüz algılama aktif değil. Lütfen bekleyin...');
-        } else if (_detectedFaces.isEmpty) {
-          _showSnackBar('Yüz algılanamadı. Lütfen kameraya bakın!');
-        } else if (_detectedFaces.length > 1) {
-          _showSnackBar('Birden fazla yüz algılandı. Lütfen tek başınıza çekim yapın.');
-        }
+              } else if (_detectedFaces.isEmpty) {
+                _showSnackBar('Yüz algılanamadı. Lütfen kameraya bakın!');
+              } else if (_detectedFaces.length > 1) {
+                _showSnackBar('Birden fazla yüz algılandı. Lütfen tek başınıza çekim yapın.');
+              } else if (!_isCorrectFaceSide) {
+                // Yüzün doğru tarafı görünmüyor
+                if (_detectedFaces.isNotEmpty) {
+                  final guidance = FaceSideDetector.getFaceSideGuidance(
+                    _detectedFaces[0],
+                    currentAngle,
+                  );
+                  _showSnackBar(guidance);
+                } else {
+                  _showSnackBar('Lütfen yüzünüzün doğru tarafını gösterin.');
+                }
+              }
       }
       return;
     }
@@ -668,6 +714,44 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             ),
           ),
 
+          // Geri butonu (sol üst)
+          Positioned(
+            top: 50,
+            left: 16,
+            child: FloatingActionButton(
+              mini: true,
+              onPressed: () {
+                // Capture durumunu sıfırla ve ilk açıya geri dön
+                ref.read(captureProvider.notifier).reset();
+                final captureNotifier = ref.read(captureProvider.notifier);
+                captureNotifier.setCurrentAngle(CaptureAngle.frontFace);
+                
+                // Yüz algılama durumunu da sıfırla
+                setState(() {
+                  _detectedFaces = [];
+                  _customPaint = null;
+                  _faceDetectionStatus = 'Başlatılıyor...';
+                  _isCorrectFaceSide = false;
+                  _faceDetectionEnabled = true;
+                  _faceDetectionErrorCount = 0;
+                  
+                  // Sensör durumunu da sıfırla
+                  _pitchHistory.clear();
+                  _rollHistory.clear();
+                  _isPositionValid = false;
+                  _isPositionStable = false;
+                  _sensorGuidance = '';
+                  _cancelAutoCaptureTimer();
+                });
+              },
+              backgroundColor: Colors.black.withOpacity(0.6),
+              child: const Icon(
+                Icons.arrow_back,
+                color: Colors.white,
+              ),
+            ),
+          ),
+
           // Kamera değiştirme butonu
           Positioned(
             top: 50,
@@ -727,6 +811,35 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                         ),
                         child: Column(
                           children: [
+                            // Debug: Pitch ve Roll değerleri (test için)
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Pitch: ${_pitch.toStringAsFixed(1)}°',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    'Roll: ${_roll.toStringAsFixed(1)}°',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
                             // Yönlendirme mesajı
                             Text(
                               _sensorGuidance.isNotEmpty
