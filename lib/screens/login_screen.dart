@@ -59,39 +59,54 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Logo placeholder
+                  // Logo
                   Container(
                     width: 120,
                     height: 120,
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade100,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      Icons.local_hospital,
-                      size: 60,
-                      color: Colors.blue.shade700,
-                    ),
+
+                      child: Image.asset(
+                        'assets/SHC_Logo.png',
+                        width: 120,
+                        height: 120,
+                        fit: BoxFit.scaleDown,
+                        errorBuilder: (context, error, stackTrace) {
+                          // Görsel yüklenemezse varsayılan icon göster
+                          return Container(
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade100,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.local_hospital,
+                              size: 60,
+                              color: Colors.blue.shade700,
+                            ),
+                          );
+                        },
+                      ),
                   ),
                   const SizedBox(height: 48),
                   
-                  // Başlık
-                  Text(
-                    'Smile Hair Clinic',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Self-Capture Tool',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 48),
+                  // // Başlık
+                  // Text(
+                  //   'Smile Hair Clinic',
+                  //   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  //     fontWeight: FontWeight.bold,
+                  //   ),
+                  //   textAlign: TextAlign.center,
+                  // ),
+                  // const SizedBox(height: 8),
+                  // Text(
+                  //   'Self-Capture Tool',
+                  //   style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  //     color: Colors.grey[600],
+                  //   ),
+                  //   textAlign: TextAlign.center,
+                  // ),
+                  // const SizedBox(height: 48),
 
                   // E-posta alanı
                   TextFormField(
@@ -99,7 +114,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
                       labelText: 'E-posta',
-                      prefixIcon: Icon(Icons.email_outlined),
+                      // prefixIcon: Icon(Icons.email_outlined),
                       border: OutlineInputBorder(),
                     ),
                     validator: (value) {
@@ -120,7 +135,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     obscureText: _obscurePassword,
                     decoration: InputDecoration(
                       labelText: 'Şifre',
-                      prefixIcon: const Icon(Icons.lock_outlined),
+                      // prefixIcon: const Icon(Icons.lock_outlined),
                       suffixIcon: IconButton(
                         icon: Icon(
                           _obscurePassword
