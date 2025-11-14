@@ -166,6 +166,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ElevatedButton(
                     onPressed: authState.isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF041332), // Buton arka plan rengi (hex: #1976D2)
+                      foregroundColor: const Color(0xFFFFFFFF), // Yazı rengi (hex: #FFFFFF)
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -175,7 +177,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFFFFFFF), // Loading indicator rengi (hex: #FFFFFF)
+                            ),
                           )
                         : const Text(
                             'Giriş Yap',
