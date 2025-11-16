@@ -18,19 +18,21 @@ class FaceSideDetector {
     }
 
     // Sol taraf çekimi için: Yüz sola dönük olmalı (sol taraf görünür)
+    // Yüzün tamamının görünmesi için yaklaşık 60 derece sola dönmüş olmalı
     if (currentAngle == CaptureAngle.leftSide) {
       final headEulerAngleY = face.headEulerAngleY ?? 0.0;
       // Negatif değer: Yüz sola dönük, sol taraf görünür
-      // -20 ile -70 derece arası ideal
-      return headEulerAngleY <= -20.0 && headEulerAngleY >= -70.0;
+      // -50 ile -70 derece arası ideal (60 derece ± 10 derece tolerans)
+      return headEulerAngleY <= -50.0 && headEulerAngleY >= -70.0;
     }
 
     // Sağ taraf çekimi için: Yüz sağa dönük olmalı (sağ taraf görünür)
+    // Yüzün tamamının görünmesi için yaklaşık 60 derece sağa dönmüş olmalı
     if (currentAngle == CaptureAngle.rightSide) {
       final headEulerAngleY = face.headEulerAngleY ?? 0.0;
       // Pozitif değer: Yüz sağa dönük, sağ taraf görünür
-      // 20-70 derece arası ideal
-      return headEulerAngleY >= 20.0 && headEulerAngleY <= 70.0;
+      // 50-70 derece arası ideal (60 derece ± 10 derece tolerans)
+      return headEulerAngleY >= 50.0 && headEulerAngleY <= 70.0;
     }
 
     // Vertex ve Back Donor için yüz yönü kontrolü yok
@@ -53,11 +55,11 @@ class FaceSideDetector {
     }
 
     if (currentAngle == CaptureAngle.leftSide) {
-      if (headEulerAngleY > -20.0) {
+      if (headEulerAngleY > -50.0) {
         if (headEulerAngleY > 0) {
           return 'Yüzünüzü sola çevirin (sol tarafınızı gösterin)';
         } else {
-          return 'Yüzünüzü daha fazla sola çevirin (sol tarafınızı gösterin)';
+          return 'Yüzünüzü daha fazla sola çevirin (yaklaşık 60° döndürün)';
         }
       } else if (headEulerAngleY < -70.0) {
         return 'Yüzünüzü biraz sağa çevirin (çok fazla döndü)';
@@ -66,11 +68,11 @@ class FaceSideDetector {
     }
 
     if (currentAngle == CaptureAngle.rightSide) {
-      if (headEulerAngleY < 20.0) {
+      if (headEulerAngleY < 50.0) {
         if (headEulerAngleY < 0) {
           return 'Yüzünüzü sağa çevirin (sağ tarafınızı gösterin)';
         } else {
-          return 'Yüzünüzü daha fazla sağa çevirin (sağ tarafınızı gösterin)';
+          return 'Yüzünüzü daha fazla sağa çevirin (yaklaşık 60° döndürün)';
         }
       } else if (headEulerAngleY > 70.0) {
         return 'Yüzünüzü biraz sola çevirin (çok fazla döndü)';
