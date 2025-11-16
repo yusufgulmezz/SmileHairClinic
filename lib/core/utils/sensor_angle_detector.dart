@@ -20,12 +20,14 @@ class SensorAngleDetector {
   }
 
   /// Vertex (Üst Taraf) için doğru pozisyon kontrolü
-  /// Telefon dikey eksende 90 dereceye yakın olmalı (yukarı doğru)
-  static bool isVertexAngleValid(double pitch, double roll, {double tolerance = 15.0}) {
-    // Pitch: 70-110 derece arası olmalı (telefon yukarı doğru)
-    // Roll: -30 ile 30 derece arası (telefon düz tutulmalı)
-    final pitchValid = pitch >= (90 - tolerance) && pitch <= (90 + tolerance);
-    final rollValid = roll.abs() <= tolerance;
+  /// Telefon kafanın üstüne, yukarı bakacak şekilde tutulmalı
+  /// Telefon yatay tutulduğunda pitch 0'a yakın, dikey tutulduğunda 90'a yakın olur
+  static bool isVertexAngleValid(double pitch, double roll, {double tolerance = 30.0}) {
+    // Pitch: -30 ile 120 derece arası kabul edilebilir (telefon yukarı bakıyor)
+    // Yatay pozisyon (pitch ~0) veya dikey pozisyon (pitch ~90) kabul edilir
+    // Roll: -45 ile 45 derece arası (telefon düz tutulmalı, hafif eğiklik kabul edilir)
+    final pitchValid = pitch >= -tolerance && pitch <= 90 + tolerance;
+    final rollValid = roll.abs() <= 45.0;
     
     return pitchValid && rollValid;
   }
@@ -81,12 +83,14 @@ class SensorAngleDetector {
 
   /// Vertex açısı için yönlendirme mesajı
   static String getVertexGuidance(double pitch, double roll) {
-    if (pitch < 70) {
-      return 'Telefonu daha yukarı kaldırın';
-    } else if (pitch > 110) {
+    // Vertex için telefon yukarı bakmalı (pitch 0-90 arası kabul edilir)
+    // Yatay pozisyon (pitch ~0) veya dikey pozisyon (pitch ~90) kabul edilir
+    if (pitch < -30) {
+      return 'Telefonu yukarı doğru çevirin';
+    } else if (pitch > 120) {
       return 'Telefonu biraz aşağı indirin';
-    } else if (roll.abs() > 15) {
-      return 'Telefonu düz tutun';
+    } else if (roll.abs() > 45) {
+      return 'Telefonu daha düz tutun';
     } else {
       return 'Pozisyon iyi! Sabit tutun';
     }
