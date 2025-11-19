@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -31,6 +33,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   bool _isProcessing = false;
   bool _isSwitchingCamera = false;
   bool _isCapturing = false;
+  FlashMode _flashMode = FlashMode.off;
+  bool _isFlashAvailable = false;
 
   // Yüz algılama
   final FaceDetector _faceDetector = FaceDetector(
@@ -58,10 +62,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   bool _isPositionStable = false;
   String _sensorGuidance = '';
   Timer? _autoCaptureTimer;
+  CaptureAngle? _autoCaptureAngle;
 
   // Stream subscription'ları
   StreamSubscription<GyroscopeEvent>? _gyroscopeSubscription;
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  bool _hasReadyTonePlayed = false;
 
   void _resetCaptureProgress() {
     ref.read(captureProvider.notifier).reset();
@@ -81,7 +87,78 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       _isPositionStable = false;
       _sensorGuidance = '';
       _cancelAutoCaptureTimer();
+      _hasReadyTonePlayed = false;
+      _flashMode = FlashMode.off;
     });
+  }
+
+  bool _isFaceAngle(CaptureAngle angle) =>
+      angle == CaptureAngle.frontFace ||
+      angle == CaptureAngle.leftSide ||
+      angle == CaptureAngle.rightSide;
+
+  bool _shouldAutoCapture(CaptureAngle angle) =>
+      angle == CaptureAngle.topVertex ||
+      angle == CaptureAngle.backDonor ||
+      angle == CaptureAngle.leftSide ||
+      angle == CaptureAngle.rightSide;
+
+  bool _isAngleReadyForAutoCapture(CaptureAngle angle) {
+    if (angle == CaptureAngle.topVertex || angle == CaptureAngle.backDonor) {
+      return _isPositionValid && _isPositionStable;
+    }
+    if (angle == CaptureAngle.leftSide || angle == CaptureAngle.rightSide) {
+      return _faceDetectionEnabled &&
+          _detectedFaces.length == 1 &&
+          _isCorrectFaceSide;
+    }
+    return false;
+  }
+
+  void _handleReadyStateChange(CaptureAngle angle, bool isReady) {
+    if (!_isFaceAngle(angle) &&
+        angle != CaptureAngle.topVertex &&
+        angle != CaptureAngle.backDonor) {
+      return;
+    }
+
+    if (isReady) {
+      if (!_hasReadyTonePlayed) {
+        _playReadySound();
+        _hasReadyTonePlayed = true;
+      }
+
+      if (_shouldAutoCapture(angle)) {
+        _startAutoCaptureTimer(angle);
+      }
+    } else {
+      if (_hasReadyTonePlayed) {
+        _hasReadyTonePlayed = false;
+      }
+      if (_shouldAutoCapture(angle)) {
+        _cancelAutoCaptureTimer(angle: angle);
+      }
+    }
+  }
+
+  void _playReadySound() {
+    FlutterRingtonePlayer.playNotification();
+    HapticFeedback.mediumImpact();
+  }
+
+  Future<void> _toggleFlashMode() async {
+    if (!_isFlashAvailable || _cameraController == null) return;
+    final nextMode = _flashMode == FlashMode.off ? FlashMode.auto : FlashMode.off;
+    try {
+      await _cameraController!.setFlashMode(nextMode);
+      if (mounted) {
+        setState(() {
+          _flashMode = nextMode;
+        });
+      }
+    } catch (e) {
+      debugPrint('Flash modu değiştirilemedi: $e');
+    }
   }
 
   @override
@@ -150,11 +227,20 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       await _cameraController!.initialize();
       _cameraController!.startImageStream(_processCameraImage);
 
+      final hasFlash = _cameras![cameraIndex].lensDirection == CameraLensDirection.back;
+      try {
+        await _cameraController!.setFlashMode(FlashMode.off);
+      } catch (e) {
+        debugPrint('Flash kapatılamadı: $e');
+      }
+
       if (mounted) {
         setState(() {
           _currentCameraIndex = cameraIndex;
           _isCameraInitialized = true;
           _isSwitchingCamera = false;
+          _flashMode = FlashMode.off;
+          _isFlashAvailable = hasFlash;
         });
       }
     } catch (e) {
@@ -251,38 +337,39 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     );
 
     // Pozisyon doğru ve stabilse otomatik çekim için timer başlat
-    if (_isPositionValid && _isPositionStable) {
-      _startAutoCaptureTimer();
-    } else {
-      _cancelAutoCaptureTimer();
-    }
+    final isReady = _isPositionValid && _isPositionStable;
+    _handleReadyStateChange(currentAngle, isReady);
   }
 
   /// Otomatik çekim timer'ı başlat (2 saniye sonra çek)
-  void _startAutoCaptureTimer() {
-    if (_autoCaptureTimer != null && _autoCaptureTimer!.isActive) {
-      return; // Timer zaten aktif
+  void _startAutoCaptureTimer(CaptureAngle angle) {
+    if (_autoCaptureTimer != null &&
+        _autoCaptureTimer!.isActive &&
+        _autoCaptureAngle == angle) {
+      return; // Timer zaten aktif ve aynı açı için
     }
 
     _autoCaptureTimer?.cancel();
+    _autoCaptureAngle = angle;
     _autoCaptureTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted && _isPositionValid && _isPositionStable && !_isCapturing) {
-        final captureState = ref.read(captureProvider);
-        final currentAngle = captureState.currentAngle;
-        
-        // Sadece Vertex ve Back Donor için otomatik çekim
-        if (currentAngle == CaptureAngle.topVertex ||
-            currentAngle == CaptureAngle.backDonor) {
-          _capturePhoto();
-        }
+      if (!mounted || _isCapturing) return;
+      final captureState = ref.read(captureProvider);
+      final currentAngle = captureState.currentAngle;
+      if (currentAngle != angle) return;
+      if (_isAngleReadyForAutoCapture(angle)) {
+        _capturePhoto();
       }
     });
   }
 
   /// Otomatik çekim timer'ını iptal et
-  void _cancelAutoCaptureTimer() {
+  void _cancelAutoCaptureTimer({CaptureAngle? angle}) {
+    if (angle != null && _autoCaptureAngle != null && _autoCaptureAngle != angle) {
+      return;
+    }
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
+    _autoCaptureAngle = null;
   }
 
   // Yüz algılama için frame sayacı (her N frame'de bir algılama yap)
@@ -297,6 +384,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     // Mevcut açıya göre yüz algılamayı kontrol et
     final captureState = ref.read(captureProvider);
     final currentAngle = captureState.currentAngle ?? CaptureAngle.frontFace;
+    final bool isFaceAngle = _isFaceAngle(currentAngle);
 
     // Vertex ve Back Donor için yüz algılama gerekmez (sensör kontrolü kullanılacak)
     if (currentAngle == CaptureAngle.topVertex ||
@@ -317,6 +405,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
         setState(() {
           _faceDetectionStatus = 'Yüz algılama devre dışı';
         });
+      }
+      if (isFaceAngle) {
+        _handleReadyStateChange(currentAngle, false);
       }
       return;
     }
@@ -353,6 +444,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
           sideGuidance = FaceSideDetector.getFaceSideGuidance(face, currentAngle);
         }
 
+        final bool readyForCapture = faces.length == 1 && isCorrectSide;
+
         setState(() {
           _detectedFaces = faces;
           _isCorrectFaceSide = isCorrectSide;
@@ -378,6 +471,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             _faceDetectionStatus = '⚠ ${faces.length} yüz algılandı - Tek başınıza çekim yapın';
           }
         });
+
+        if (isFaceAngle) {
+          _handleReadyStateChange(currentAngle, readyForCapture);
+        }
       }
     } catch (e) {
       _faceDetectionErrorCount++;
@@ -392,6 +489,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             _detectedFaces = [];
             _customPaint = null;
           });
+        }
+        if (isFaceAngle) {
+          _handleReadyStateChange(currentAngle, false);
         }
       } else if (mounted) {
         setState(() {
@@ -581,8 +681,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       final nextAngle = captureNotifier.getNextAngle();
       if (nextAngle != null) {
         captureNotifier.setCurrentAngle(nextAngle);
+        _cancelAutoCaptureTimer();
+        _hasReadyTonePlayed = false;
       } else {
         // Tüm fotoğraflar çekildi
+        _cancelAutoCaptureTimer();
+        _hasReadyTonePlayed = false;
         Future.delayed(const Duration(seconds: 1), () {
           if (mounted) {
             context.go('/summary');
@@ -745,6 +849,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                   mini: true,
                   heroTag: 'backToGuide',
                   onPressed: () {
+                    _cancelAutoCaptureTimer();
+                    _hasReadyTonePlayed = false;
                     context.go('/guide');
                   },
                   backgroundColor: Colors.black.withOpacity(0.6),
@@ -768,32 +874,49 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             ),
           ),
 
-          // Kamera değiştirme butonu
+          // Sağ üst butonlar (flash + kamera değiştirme)
           Positioned(
             top: 50,
             right: 16,
-            child: FloatingActionButton(
-              mini: true,
-              onPressed: _isSwitchingCamera ? null : _toggleCamera,
-              backgroundColor: Colors.black.withOpacity(0.6),
-              child: _isSwitchingCamera
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : Icon(
-                      _cameras != null &&
-                              _currentCameraIndex < _cameras!.length &&
-                              _cameras![_currentCameraIndex].lensDirection ==
-                                  CameraLensDirection.front
-                          ? Icons.camera_rear
-                          : Icons.camera_front,
+            child: Column(
+              children: [
+                if (_isFlashAvailable)
+                  FloatingActionButton(
+                    mini: true,
+                    heroTag: 'flashToggle',
+                    onPressed: _toggleFlashMode,
+                    backgroundColor: Colors.black.withOpacity(0.6),
+                    child: Icon(
+                      _flashMode == FlashMode.off ? Icons.flash_off : Icons.flash_auto,
                       color: Colors.white,
                     ),
+                  ),
+                if (_isFlashAvailable) const SizedBox(height: 12),
+                FloatingActionButton(
+                  mini: true,
+                  heroTag: 'switchCamera',
+                  onPressed: _isSwitchingCamera ? null : _toggleCamera,
+                  backgroundColor: Colors.black.withOpacity(0.6),
+                  child: _isSwitchingCamera
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Icon(
+                          _cameras != null &&
+                                  _currentCameraIndex < _cameras!.length &&
+                                  _cameras![_currentCameraIndex].lensDirection ==
+                                      CameraLensDirection.front
+                              ? Icons.camera_rear
+                              : Icons.camera_front,
+                          color: Colors.white,
+                        ),
+                ),
+              ],
             ),
           ),
 
