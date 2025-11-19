@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -142,7 +141,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   }
 
   void _playReadySound() {
-    FlutterRingtonePlayer.playNotification();
+    SystemSound.play(SystemSoundType.alert);
     HapticFeedback.mediumImpact();
   }
 
