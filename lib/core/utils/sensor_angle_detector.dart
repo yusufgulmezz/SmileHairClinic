@@ -22,12 +22,19 @@ class SensorAngleDetector {
   /// Vertex (Üst Taraf) için doğru pozisyon kontrolü
   /// Telefon kafanın üstüne, yukarı bakacak şekilde tutulmalı
   /// Telefon yatay tutulduğunda pitch 0'a yakın, dikey tutulduğunda 90'a yakın olur
-  static bool isVertexAngleValid(double pitch, double roll, {double tolerance = 30.0}) {
-    // Pitch: -30 ile 120 derece arası kabul edilebilir (telefon yukarı bakıyor)
-    // Yatay pozisyon (pitch ~0) veya dikey pozisyon (pitch ~90) kabul edilir
-    // Roll: -45 ile 45 derece arası (telefon düz tutulmalı, hafif eğiklik kabul edilir)
-    final pitchValid = pitch >= -tolerance && pitch <= 90 + tolerance;
-    final rollValid = roll.abs() <= 45.0;
+  static bool isVertexAngleValid(
+    double pitch,
+    double roll, {
+    double pitchTolerance = 95.0,
+    double rollFlatTolerance = 45.0,
+    double rollUpsideDownTolerance = 45.0,
+  }) {
+    // Tepe çekiminde telefon hem portre (roll ~0) hem de yatay ters (roll ~±180) tutulabilir.
+    final pitchValid = pitch.abs() <= pitchTolerance;
+    final rollFlat = roll.abs() <= rollFlatTolerance;
+    final rollUpsideDown =
+        (180 - roll.abs()).abs() <= rollUpsideDownTolerance;
+    final rollValid = rollFlat || rollUpsideDown;
     
     return pitchValid && rollValid;
   }
@@ -83,17 +90,13 @@ class SensorAngleDetector {
 
   /// Vertex açısı için yönlendirme mesajı
   static String getVertexGuidance(double pitch, double roll) {
-    // Vertex için telefon yukarı bakmalı (pitch 0-90 arası kabul edilir)
-    // Yatay pozisyon (pitch ~0) veya dikey pozisyon (pitch ~90) kabul edilir
-    if (pitch < -30) {
-      return 'Telefonu yukarı doğru çevirin';
-    } else if (pitch > 120) {
-      return 'Telefonu biraz aşağı indirin';
-    } else if (roll.abs() > 45) {
-      return 'Telefonu daha düz tutun';
-    } else {
-      return 'Pozisyon iyi! Sabit tutun';
+    if (pitch.abs() > 100) {
+      return 'Telefonu biraz daha dik konumlandırın';
     }
+    if (!(roll.abs() <= 50 || (180 - roll.abs()).abs() <= 50)) {
+      return 'Telefonu düzleştirin';
+    }
+    return 'Pozisyon iyi! Sabit tutun';
   }
 
   /// Back Donor açısı için yönlendirme mesajı
