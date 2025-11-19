@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vibration/vibration.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -142,7 +143,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
   void _playReadySound() {
     SystemSound.play(SystemSoundType.alert);
-    HapticFeedback.mediumImpact();
+    Vibration.hasVibrator().then((hasVibrator) {
+      if (hasVibrator ?? false) {
+        Vibration.vibrate(duration: 150, amplitude: 200);
+      } else {
+        HapticFeedback.heavyImpact();
+      }
+    });
   }
 
   Future<void> _toggleFlashMode() async {
