@@ -17,6 +17,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _obscurePassword = true;
 
   @override
+  void initState() {
+    super.initState();
+    _emailController.text = 'aitech_test@gmail.com';
+    _passwordController.text = '123123';
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
@@ -32,7 +39,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
 
       if (success && mounted) {
-        context.go('/dashboard');
+        context.go('/guide');
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

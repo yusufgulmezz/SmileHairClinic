@@ -128,9 +128,9 @@ class SummaryScreen extends ConsumerWidget {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              // Başarılı gönderim sonrası dashboard'a dön
+              // Başarılı gönderim sonrası guide ekranına dön
               ref.read(captureProvider.notifier).reset();
-              context.go('/dashboard');
+              context.go('/guide');
             },
             child: const Text('Tamam'),
           ),

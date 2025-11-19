@@ -63,6 +63,27 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   StreamSubscription<GyroscopeEvent>? _gyroscopeSubscription;
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
 
+  void _resetCaptureProgress() {
+    ref.read(captureProvider.notifier).reset();
+    final captureNotifier = ref.read(captureProvider.notifier);
+    captureNotifier.setCurrentAngle(CaptureAngle.frontFace);
+
+    setState(() {
+      _detectedFaces = [];
+      _customPaint = null;
+      _faceDetectionStatus = 'Başlatılıyor...';
+      _isCorrectFaceSide = false;
+      _faceDetectionEnabled = true;
+      _faceDetectionErrorCount = 0;
+      _pitchHistory.clear();
+      _rollHistory.clear();
+      _isPositionValid = false;
+      _isPositionStable = false;
+      _sensorGuidance = '';
+      _cancelAutoCaptureTimer();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -714,41 +735,36 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             ),
           ),
 
-          // Geri butonu (sol üst)
+          // Geri ve sıfırlama butonları (sol üst)
           Positioned(
             top: 50,
             left: 16,
-            child: FloatingActionButton(
-              mini: true,
-              onPressed: () {
-                // Capture durumunu sıfırla ve ilk açıya geri dön
-                ref.read(captureProvider.notifier).reset();
-                final captureNotifier = ref.read(captureProvider.notifier);
-                captureNotifier.setCurrentAngle(CaptureAngle.frontFace);
-                
-                // Yüz algılama durumunu da sıfırla
-                setState(() {
-                  _detectedFaces = [];
-                  _customPaint = null;
-                  _faceDetectionStatus = 'Başlatılıyor...';
-                  _isCorrectFaceSide = false;
-                  _faceDetectionEnabled = true;
-                  _faceDetectionErrorCount = 0;
-                  
-                  // Sensör durumunu da sıfırla
-                  _pitchHistory.clear();
-                  _rollHistory.clear();
-                  _isPositionValid = false;
-                  _isPositionStable = false;
-                  _sensorGuidance = '';
-                  _cancelAutoCaptureTimer();
-                });
-              },
-              backgroundColor: Colors.black.withOpacity(0.6),
-              child: const Icon(
-                Icons.arrow_back,
-                color: Colors.white,
-              ),
+            child: Column(
+              children: [
+                FloatingActionButton(
+                  mini: true,
+                  heroTag: 'backToGuide',
+                  onPressed: () {
+                    context.go('/guide');
+                  },
+                  backgroundColor: Colors.black.withOpacity(0.6),
+                  child: const Icon(
+                    Icons.arrow_back,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  mini: true,
+                  heroTag: 'resetCaptures',
+                  onPressed: _resetCaptureProgress,
+                  backgroundColor: Colors.black.withOpacity(0.6),
+                  child: const Icon(
+                    Icons.refresh,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
             ),
           ),
 
